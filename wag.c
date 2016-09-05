@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define EVENT_SIZE  (sizeof(struct inotify_event))
 #define EVENT_BUF_LEN   (1024 * ( EVENT_SIZE + 16 ))
 #define NUM_FORMAT_OPTIONS 3
+#define LOG_BUFFER_SIZE 10000
 
 //TODO clean up and describe globals
 int top_size;
@@ -38,7 +39,7 @@ WINDOW * top;
 WINDOW * bottom;
 int dualPane;
 int parent_y, parent_x;
-char logBuffer[10000];
+char logBuffer[LOG_BUFFER_SIZE];
 char searchBuffer[1000];
 char searchTerm[1000];
 FILE * readfd;
@@ -136,7 +137,20 @@ void print_last_lines(FILE * fd, int n) {
 
 
 bool updateLogBuffer(char * string) {
-    logBufferWritePosIndex += sprintf(logBuffer + logBufferWritePosIndex, "%s", string);
+    int stringLen = strlen(string);
+    if (logBufferWritePosIndex + stringLen < LOG_BUFFER_SIZE) {
+        logBufferWritePosIndex += sprintf(logBuffer + logBufferWritePosIndex, "%s", string);
+        logBufferWritePosIndex = logBufferWritePosIndex % LOG_BUFFER_SIZE;
+    } else {
+        int i = 0;
+        int k = logBufferWritePosIndex;
+        while (i < stringLen) {
+            logBuffer[k % LOG_BUFFER_SIZE] = string[i];
+            i++;
+            k++;
+        }
+        logBufferWritePosIndex = k % LOG_BUFFER_SIZE;
+    }
     if (strstr(string, "\n") != NULL) { //if the new string has a newline, flush butter to screen
         fullWinRefresh();
     }
@@ -145,6 +159,7 @@ bool updateLogBuffer(char * string) {
 
 bool updateLogBufferC(char c) {
     logBufferWritePosIndex += sprintf(logBuffer + logBufferWritePosIndex, "%c", c);
+    logBufferWritePosIndex = logBufferWritePosIndex % LOG_BUFFER_SIZE;
     if (c == '\n') {
         fullWinRefresh();
     }
@@ -160,8 +175,9 @@ void search() {
     while (1) {
         int i = 0;
         while ((cur = wgetch(top)) != 10) {
-            if (cur == 127) {
+            if (cur == 127) { //delete char
                 i--;
+                searchBuffer[i] = '\0'; //delete the char from the buffer
                 wmove(top, half-2, 8 + i);
                 wdelch(top);
                 wrefresh(top);
@@ -237,14 +253,14 @@ void toggleSearchWindow(){
 
 void drawMainWindow() {
     if (logBufferWritePosIndex != logBufferReadPosIndex) {
-        char drawBuf[500];
+        char drawBuf[LOG_BUFFER_SIZE];
         memset(drawBuf, 0, sizeof(drawBuf));
-        int k = 0;
-        for (int i = logBufferReadPosIndex; i < logBufferWritePosIndex; i++) {
-            drawBuf[k] = logBuffer[i];
+        int k = 0; int i = logBufferReadPosIndex;
+        while ((i % LOG_BUFFER_SIZE)  != (logBufferWritePosIndex % LOG_BUFFER_SIZE)) {
+            drawBuf[k] = logBuffer[i % LOG_BUFFER_SIZE];
             k++;
+            i++;
         }
-
         wprintw(bottom, drawBuf);
         logBufferReadPosIndex = logBufferWritePosIndex;
     }
@@ -280,6 +296,19 @@ void winchHandler(int nil) {
     parent_x = new_x;
     mvwin(bottom, new_y - bottom_size, 0);
     wclear(bottom);
+    int j = logBufferReadPosIndex -1;
+    int newlineCount = 0;
+    while (newlineCount < new_y && j != logBufferReadPosIndex) {
+        if (logBuffer[j] == '\n') {
+            newlineCount++;
+        }
+        j--;
+        j = j % LOG_BUFFER_SIZE;
+    }
+
+
+    logBufferReadPosIndex = j + 1;
+
     fullWinRefresh();
 }
 
