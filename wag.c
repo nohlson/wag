@@ -26,11 +26,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <sys/types.h>
 #include <sys/inotify.h>
 #include <fcntl.h>
+#include <time.h>
 
 #define EVENT_SIZE  (sizeof(struct inotify_event))
 #define EVENT_BUF_LEN   (1024 * ( EVENT_SIZE + 16 ))
 #define NUM_FORMAT_OPTIONS 3
 #define LOG_BUFFER_SIZE 10000
+#define NUM_INIT_LINES 100
 
 //TODO clean up and describe globals
 int top_size;
@@ -67,6 +69,12 @@ void winchHandler(int nil);
 void intHandler(int nil);
 void onboarding();
 
+
+int mod(int a, int b) {
+    int r = a % b;
+    return r < 0 ? r + b : r;
+}
+
 void track() {
     char c;
     int length;
@@ -96,7 +104,7 @@ void print_last_lines(FILE * fd, int n) {
     int printcount = 0;
     char c;
     fseek(fd, -2, SEEK_END); //go to last byte of file
-    char lastLineBuffer[500];
+    char lastLineBuffer[LOG_BUFFER_SIZE];
     memset(lastLineBuffer, 0, sizeof(lastLineBuffer));
 
     int atStart = 0;
@@ -140,16 +148,16 @@ bool updateLogBuffer(char * string) {
     int stringLen = strlen(string);
     if (logBufferWritePosIndex + stringLen < LOG_BUFFER_SIZE) {
         logBufferWritePosIndex += sprintf(logBuffer + logBufferWritePosIndex, "%s", string);
-        logBufferWritePosIndex = logBufferWritePosIndex % LOG_BUFFER_SIZE;
+        logBufferWritePosIndex = mod(logBufferWritePosIndex, LOG_BUFFER_SIZE);
     } else {
         int i = 0;
         int k = logBufferWritePosIndex;
         while (i < stringLen) {
-            logBuffer[k % LOG_BUFFER_SIZE] = string[i];
+            logBuffer[mod(k, LOG_BUFFER_SIZE)] = string[i];
             i++;
             k++;
         }
-        logBufferWritePosIndex = k % LOG_BUFFER_SIZE;
+        logBufferWritePosIndex = mod(k, LOG_BUFFER_SIZE);
     }
     if (strstr(string, "\n") != NULL) { //if the new string has a newline, flush butter to screen
         fullWinRefresh();
@@ -159,7 +167,7 @@ bool updateLogBuffer(char * string) {
 
 bool updateLogBufferC(char c) {
     logBufferWritePosIndex += sprintf(logBuffer + logBufferWritePosIndex, "%c", c);
-    logBufferWritePosIndex = logBufferWritePosIndex % LOG_BUFFER_SIZE;
+    logBufferWritePosIndex = mod(logBufferWritePosIndex, LOG_BUFFER_SIZE);
     if (c == '\n') {
         fullWinRefresh();
     }
@@ -234,15 +242,15 @@ void drawSearchWindow() {
 
 
 void toggleSearchWindow(){
-    updateLogBuffer("Search Toggle\n");
+    // updateLogBuffer("Search Toggle\n");
     if (dualPane) {
         dualPane = 0;
-        updateLogBuffer("Dual Pane set to False\n");
+        // updateLogBuffer("Dual Pane set to False\n");
         memset(searchTerm, 0, sizeof(searchTerm));
         delwin(top);
         drawMainWindow();
     } else {
-        updateLogBuffer("Dual Pane set to True\n");
+        // updateLogBuffer("Dual Pane set to True\n");
         dualPane = 1;
         //clear search buffer
         memset(searchBuffer,0,sizeof(searchBuffer));
@@ -256,8 +264,8 @@ void drawMainWindow() {
         char drawBuf[LOG_BUFFER_SIZE];
         memset(drawBuf, 0, sizeof(drawBuf));
         int k = 0; int i = logBufferReadPosIndex;
-        while ((i % LOG_BUFFER_SIZE)  != (logBufferWritePosIndex % LOG_BUFFER_SIZE)) {
-            drawBuf[k] = logBuffer[i % LOG_BUFFER_SIZE];
+        while ((i % LOG_BUFFER_SIZE)  != (mod(logBufferWritePosIndex, LOG_BUFFER_SIZE))) {
+            drawBuf[k] = logBuffer[mod(i, LOG_BUFFER_SIZE)];
             k++;
             i++;
         }
@@ -286,7 +294,7 @@ void fullWinRefresh() {
 
 //signal handlers
 void winchHandler(int nil) {
-    updateLogBuffer("Screen Resize\n");
+    //updateLogBuffer("Screen Resize\n");
     int new_y, new_x;
     endwin();
     refresh();
@@ -302,10 +310,8 @@ void winchHandler(int nil) {
         if (logBuffer[j] == '\n') {
             newlineCount++;
         }
-        j--;
-        j = j % LOG_BUFFER_SIZE;
+        j = mod((j-1), LOG_BUFFER_SIZE);
     }
-
 
     logBufferReadPosIndex = j + 1;
 
@@ -407,7 +413,6 @@ void onboarding() {
 int main(int argc, char * argv[]) {
     dualPane = 0; // starts off with one pane
     int wd;
-    int nLines = 25;
     char startupMessages[200];
     char choice;
 
@@ -443,7 +448,7 @@ int main(int argc, char * argv[]) {
 
     //open file for reading and print last lines
     readfd = fopen(filename, "r");
-    print_last_lines(readfd, nLines);
+    print_last_lines(readfd, NUM_INIT_LINES);
 
     // //create thread for tracking file
     pthread_t trackThread;
