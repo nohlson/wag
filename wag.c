@@ -65,6 +65,7 @@ void toggleSearchWindow();
 void drawMainWindow();
 void gracefulExit();
 void fullWinRefresh();
+void refillMain();
 void winchHandler(int nil);
 void intHandler(int nil);
 void onboarding();
@@ -242,15 +243,14 @@ void drawSearchWindow() {
 
 
 void toggleSearchWindow(){
-    // updateLogBuffer("Search Toggle\n");
     if (dualPane) {
         dualPane = 0;
-        // updateLogBuffer("Dual Pane set to False\n");
         memset(searchTerm, 0, sizeof(searchTerm));
         delwin(top);
-        drawMainWindow();
+        refresh();
+        fullWinRefresh();
+        refillMain();
     } else {
-        // updateLogBuffer("Dual Pane set to True\n");
         dualPane = 1;
         //clear search buffer
         memset(searchBuffer,0,sizeof(searchBuffer));
@@ -260,6 +260,8 @@ void toggleSearchWindow(){
 }
 
 void drawMainWindow() {
+    wprintw(bottom, "%i %i ", logBufferReadPosIndex, logBufferWritePosIndex);
+    wrefresh(bottom);
     if (logBufferWritePosIndex != logBufferReadPosIndex) {
         char drawBuf[LOG_BUFFER_SIZE];
         memset(drawBuf, 0, sizeof(drawBuf));
@@ -292,6 +294,25 @@ void fullWinRefresh() {
     }
 }
 
+void refillMain() {
+    int new_y, new_x;
+    getmaxyx(stdscr, new_y, new_x);
+    int j = logBufferReadPosIndex -1;
+    int newlineCount = 0;
+    while (newlineCount < new_y && j != logBufferReadPosIndex && logBuffer[j] != '\0') {
+        if (logBuffer[j] == '\n') {
+            newlineCount++;
+            // wprintw(bottom, "%i, %i\n", newlineCount, j);
+            // wrefresh(bottom);
+        }
+        j = mod((j-1), LOG_BUFFER_SIZE);
+    }
+
+    logBufferReadPosIndex = mod(j + 1, LOG_BUFFER_SIZE);
+    werase(bottom);
+    fullWinRefresh();
+}
+
 //signal handlers
 void winchHandler(int nil) {
     //updateLogBuffer("Screen Resize\n");
@@ -304,18 +325,7 @@ void winchHandler(int nil) {
     parent_x = new_x;
     mvwin(bottom, new_y - bottom_size, 0);
     wclear(bottom);
-    int j = logBufferReadPosIndex -1;
-    int newlineCount = 0;
-    while (newlineCount < new_y && j != logBufferReadPosIndex) {
-        if (logBuffer[j] == '\n') {
-            newlineCount++;
-        }
-        j = mod((j-1), LOG_BUFFER_SIZE);
-    }
-
-    logBufferReadPosIndex = j + 1;
-
-    fullWinRefresh();
+    refillMain();
 }
 
 void intHandler(int nil) {
@@ -455,9 +465,9 @@ int main(int argc, char * argv[]) {
     pthread_create(&trackThread, NULL, (void * (*) (void *))track, NULL);
 
     //mainloop
-    sprintf(startupMessages, "Format code %i selected\n", formatCode);
+    // sprintf(startupMessages, "Format code %i selected\n", formatCode);
     updateLogBuffer(startupMessages);
-    sprintf(startupMessages, "Begun tracking file %s\n", filename);
+    // sprintf(startupMessages, "Began tracking file %s\n", filename);
     updateLogBuffer(startupMessages);
     while (1) {
         choice = wgetch(bottom);
