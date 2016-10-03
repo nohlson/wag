@@ -260,7 +260,6 @@ void toggleSearchWindow(){
 }
 
 void drawMainWindow() {
-    wprintw(bottom, "%i %i ", logBufferReadPosIndex, logBufferWritePosIndex);
     wrefresh(bottom);
     if (logBufferWritePosIndex != logBufferReadPosIndex) {
         char drawBuf[LOG_BUFFER_SIZE];
@@ -382,6 +381,7 @@ void onboarding() {
         }
     }
     wclear(onboard);
+    /*
     keypad(onboard, TRUE);
     k = 0;
     mvwprintw(onboard, 0, 0, "Please select file name format:");
@@ -416,6 +416,7 @@ void onboarding() {
     }
     mvwprintw(onboard, 20, 20, "%i", k);
     formatCode = k;
+    */
     delwin(onboard);
     endwin();
 }
