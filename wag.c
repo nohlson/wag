@@ -51,6 +51,7 @@ int logBufferReadPosIndex = 0;
 int logBufferWritePosIndex = 0;
 char filename[100];
 int formatCode;
+int wd;
 
 char formats[NUM_FORMAT_OPTIONS][50] = {"1. None", "2. {NAME}YYYY-MM-DD.{FILEEXT}", "3. MM-DD-YYY.{FILEEXT}"};
 int half;
@@ -80,6 +81,8 @@ void track() {
     char c;
     int length;
     int i;
+    char info[16];
+    sprintf(info, "Inotify event\n");
     while (1) {
         struct inotify_event *event = (struct inotify_event *)&eventBuffer[0];
         if( event->len == 0) {
@@ -90,6 +93,7 @@ void track() {
                 i++;
             }
             tempTrackBuf[i] = '\0';
+            updateLogBuffer(info);
             updateLogBuffer(tempTrackBuf);
         }
         length = read( fd, eventBuffer, EVENT_BUF_LEN );
@@ -421,9 +425,18 @@ void onboarding() {
     endwin();
 }
 
+int swapWatchFilename(int fd, int wd, char * oldFilename, char * newFilename) {
+    if (oldFilename != NULL && wd != NULL) {
+        if (inotify_rm_watch(fd, wd) == -1) {
+            perror("inotify rm watch error");
+        }
+    }
+    return inotify_add_watch(fd, newFilename, IN_MODIFY);
+
+}
+
 int main(int argc, char * argv[]) {
     dualPane = 0; // starts off with one pane
-    int wd;
     char startupMessages[200];
     char choice;
 
