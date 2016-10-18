@@ -27,6 +27,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <sys/inotify.h>
 #include <fcntl.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #define EVENT_SIZE  (sizeof(struct inotify_event))
 #define EVENT_BUF_LEN   (1024 * ( EVENT_SIZE + 16 ))
@@ -70,6 +72,7 @@ void refillMain();
 void winchHandler(int nil);
 void intHandler(int nil);
 void onboarding();
+int swapFilename();
 
 
 int mod(int a, int b) {
@@ -81,24 +84,46 @@ void track() {
     char c;
     int length;
     int i;
-    char info[16];
-    sprintf(info, "Inotify event\n");
+    int j;
+    char info[40];
+    struct stat sb;
     while (1) {
-        struct inotify_event *event = (struct inotify_event *)&eventBuffer[0];
-        if( event->len == 0) {
-            i = 0;
-            char tempTrackBuf[500];
-            while ((c = fgetc(readfd)) != EOF) {
-                tempTrackBuf[i] = c;
-                i++;
-            }
-            tempTrackBuf[i] = '\0';
-            updateLogBuffer(info);
-            updateLogBuffer(tempTrackBuf);
-        }
+        memset(eventBuffer, 0, EVENT_BUF_LEN);
         length = read( fd, eventBuffer, EVENT_BUF_LEN );
-        if ( length < 0 ) {
-            perror( "read" );
+        j = 0;
+        while (j < length) {
+            struct inotify_event *event = (struct inotify_event *)&eventBuffer[j];
+            if( event->mask & IN_MODIFY ) {
+                if (stat(filename, &sb) == -1) {
+                    perror("stat");
+                    exit(EXIT_FAILURE);
+                }
+                i = 0;
+                char tempTrackBuf[500];
+                while ((c = fgetc(readfd)) != EOF) {
+                    tempTrackBuf[i] = c;
+                    i++;
+                }
+                tempTrackBuf[i] = '\0';
+                updateLogBuffer(tempTrackBuf);
+            } else if ( event->mask & IN_MOVE_SELF) {
+                sprintf(info, "File has moved. Attempting to rotate log...\n");
+                updateLogBuffer(info);
+                sleep(1); //wait for rotation to occur
+                if ((wd = swapFilename(fd, wd, filename, filename)) < 0) {
+                    perror("filename not found");
+                    exit(1);
+                } else {
+                    sprintf(info, "Success.\n");
+                    updateLogBuffer(info);
+                }
+
+            }
+            
+            if ( length < 0 ) {
+                perror( "read" );
+            }
+            j += EVENT_SIZE + event->len;
         }
     }
 }
@@ -425,13 +450,15 @@ void onboarding() {
     endwin();
 }
 
-int swapWatchFilename(int fd, int wd, char * oldFilename, char * newFilename) {
-    if (oldFilename != NULL && wd != NULL) {
+int swapFilename(int fd, int wd, char * oldFilename, char * newFilename) {
+    if (*oldFilename != 0 && fcntl(wd, F_GETFD) != -1) {
         if (inotify_rm_watch(fd, wd) == -1) {
             perror("inotify rm watch error");
         }
     }
-    return inotify_add_watch(fd, newFilename, IN_MODIFY);
+    readfd = fopen(filename, "r");
+    print_last_lines(readfd, NUM_INIT_LINES);
+    return inotify_add_watch(fd, newFilename, IN_MODIFY|IN_MOVE_SELF);
 
 }
 
@@ -468,7 +495,7 @@ int main(int argc, char * argv[]) {
     }
 
     //add watch for the filename
-    wd = inotify_add_watch( fd, filename, IN_MODIFY);
+    wd = inotify_add_watch( fd, filename, IN_MODIFY|IN_MOVE_SELF);
 
     //open file for reading and print last lines
     readfd = fopen(filename, "r");
