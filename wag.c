@@ -16,6 +16,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include <stdlib.h>
+#include <stdio.h>
+#include <stdbool.h>
+#include "wag.h"
 #include <ncurses.h>
 #include <unistd.h>
 #include <signal.h>
@@ -29,12 +32,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <time.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-
-#define EVENT_SIZE  (sizeof(struct inotify_event))
-#define EVENT_BUF_LEN   (1024 * ( EVENT_SIZE + 16 ))
-#define NUM_FORMAT_OPTIONS 3
-#define LOG_BUFFER_SIZE 10000
-#define NUM_INIT_LINES 100
 
 //TODO clean up and describe globals
 int top_size;
@@ -58,29 +55,9 @@ int wd;
 char formats[NUM_FORMAT_OPTIONS][50] = {"1. None", "2. {NAME}YYYY-MM-DD.{FILEEXT}", "3. MM-DD-YYY.{FILEEXT}"};
 int half;
 
-void track();
-void print_last_lines(FILE * fd, int n);
-bool updateLogBuffer(char * string);
-bool updateLogBufferC(char c);
-void search();
-void drawSearchWindow();
-void toggleSearchWindow();
-void drawMainWindow();
-void gracefulExit();
-void fullWinRefresh();
-void refillMain();
-void winchHandler(int nil);
-void intHandler(int nil);
-void onboarding();
-int swapFilename();
 
 
-int mod(int a, int b) {
-    int r = a % b;
-    return r < 0 ? r + b : r;
-}
-
-void track() {
+void track(void) {
     char c;
     int length;
     int i;
@@ -178,16 +155,16 @@ bool updateLogBuffer(char * string) {
     int stringLen = strlen(string);
     if (logBufferWritePosIndex + stringLen < LOG_BUFFER_SIZE) {
         logBufferWritePosIndex += sprintf(logBuffer + logBufferWritePosIndex, "%s", string);
-        logBufferWritePosIndex = mod(logBufferWritePosIndex, LOG_BUFFER_SIZE);
+        logBufferWritePosIndex = MOD(logBufferWritePosIndex, LOG_BUFFER_SIZE);
     } else {
         int i = 0;
         int k = logBufferWritePosIndex;
         while (i < stringLen) {
-            logBuffer[mod(k, LOG_BUFFER_SIZE)] = string[i];
+            logBuffer[MOD(k, LOG_BUFFER_SIZE)] = string[i];
             i++;
             k++;
         }
-        logBufferWritePosIndex = mod(k, LOG_BUFFER_SIZE);
+        logBufferWritePosIndex = MOD(k, LOG_BUFFER_SIZE);
     }
     if (strstr(string, "\n") != NULL) { //if the new string has a newline, flush butter to screen
         fullWinRefresh();
@@ -197,15 +174,18 @@ bool updateLogBuffer(char * string) {
 
 bool updateLogBufferC(char c) {
     logBufferWritePosIndex += sprintf(logBuffer + logBufferWritePosIndex, "%c", c);
-    logBufferWritePosIndex = mod(logBufferWritePosIndex, LOG_BUFFER_SIZE);
+    logBufferWritePosIndex = MOD(logBufferWritePosIndex, LOG_BUFFER_SIZE);
     if (c == '\n') {
         fullWinRefresh();
     }
     return true;
 }
 
+int searchFile(char * fileName, char * search) {
+    char line[512];
+}
 
-void search() {
+void search(void) {
     char cur = 0;
     int breakOut = 0;
     //maintain the search "state"
@@ -256,8 +236,7 @@ void search() {
     }
 }
 
-
-void drawSearchWindow() {
+void drawSearchWindow(void) {
     half = parent_y/2;
     top = newwin(half, parent_x, 0, 0);
     scrollok(top, TRUE);
@@ -270,8 +249,7 @@ void drawSearchWindow() {
     wrefresh(top);
 }
 
-
-void toggleSearchWindow(){
+void toggleSearchWindow(void){
     if (dualPane) {
         dualPane = 0;
         memset(searchTerm, 0, sizeof(searchTerm));
@@ -288,14 +266,14 @@ void toggleSearchWindow(){
     }
 }
 
-void drawMainWindow() {
+void drawMainWindow(void) {
     wrefresh(bottom);
     if (logBufferWritePosIndex != logBufferReadPosIndex) {
         char drawBuf[LOG_BUFFER_SIZE];
         memset(drawBuf, 0, sizeof(drawBuf));
         int k = 0; int i = logBufferReadPosIndex;
-        while ((i % LOG_BUFFER_SIZE)  != (mod(logBufferWritePosIndex, LOG_BUFFER_SIZE))) {
-            drawBuf[k] = logBuffer[mod(i, LOG_BUFFER_SIZE)];
+        while ((i % LOG_BUFFER_SIZE)  != (MOD(logBufferWritePosIndex, LOG_BUFFER_SIZE))) {
+            drawBuf[k] = logBuffer[MOD(i, LOG_BUFFER_SIZE)];
             k++;
             i++;
         }
@@ -305,7 +283,7 @@ void drawMainWindow() {
     wrefresh(bottom);
 }
 
-void gracefulExit() {
+void gracefulExit(void) {
     delwin(bottom);
     delwin(top);
     endwin();
@@ -314,15 +292,14 @@ void gracefulExit() {
     exit(1);   
 }
 
-//full app refresh
-void fullWinRefresh() {
+void fullWinRefresh(void) {
     drawMainWindow();
     if (dualPane) {
         drawSearchWindow();
     }
 }
 
-void refillMain() {
+void refillMain(void) {
     int new_y, new_x;
     getmaxyx(stdscr, new_y, new_x);
     int j = logBufferReadPosIndex -1;
@@ -333,15 +310,14 @@ void refillMain() {
             // wprintw(bottom, "%i, %i\n", newlineCount, j);
             // wrefresh(bottom);
         }
-        j = mod((j-1), LOG_BUFFER_SIZE);
+        j = MOD((j-1), LOG_BUFFER_SIZE);
     }
 
-    logBufferReadPosIndex = mod(j + 1, LOG_BUFFER_SIZE);
+    logBufferReadPosIndex = MOD(j + 1, LOG_BUFFER_SIZE);
     werase(bottom);
     fullWinRefresh();
 }
 
-//signal handlers
 void winchHandler(int nil) {
     //updateLogBuffer("Screen Resize\n");
     int new_y, new_x;
@@ -360,7 +336,7 @@ void intHandler(int nil) {
     gracefulExit();
 }
 
-void onboarding() {
+void onboarding(void) {
     // onboarding window
     char onboardChar;
     char prompt[] = "File: ";
@@ -459,7 +435,6 @@ int swapFilename(int fd, int wd, char * oldFilename, char * newFilename) {
     readfd = fopen(filename, "r");
     print_last_lines(readfd, NUM_INIT_LINES);
     return inotify_add_watch(fd, newFilename, IN_MODIFY|IN_MOVE_SELF);
-
 }
 
 int main(int argc, char * argv[]) {
