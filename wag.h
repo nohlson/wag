@@ -14,8 +14,11 @@ struct circbuffer {
 	char		buffer[LOG_BUFFER_SIZE];	/*Actual buffer of buffer size*/
 	uint32_t	readPos;					/*read index of buffer*/
 	uint32_t	writePos;					/*write index of buffer*/
+	uint32_t	size;
 
 };
+
+struct circbuffer logBuffer;
 
 int main(int argc, char * argv[]);
 

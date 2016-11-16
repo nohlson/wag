@@ -38,14 +38,11 @@ WINDOW *top;    /* top 'search' window */
 WINDOW *bottom; /* bottom 'main' window */
 bool dualPane;  /* is the second window visible */
 int parent_y, parent_x; /*size of the terminal window itself */
-char logBuffer[LOG_BUFFER_SIZE];    /* buffer for the log, to be replaced with circbuffer struct */
 char searchBuffer[1000];    /* buffer for the users search query */
 char searchQuery[1000];     /* user's search query */
 FILE * readfd;  /*file descriptor for log file */
 char eventBuffer[EVENT_BUF_LEN];    /* event buffer for inotify */
 int inFd; /* file descriptor for inotify */
-int logBufferReadPosIndex = 0;  /* log buffer read index, to be replaced with circbuffer */
-int logBufferWritePosIndex = 0; /* log buffer wrire index, to be replaced with circbuffer */
 char filename[100]; /* log filename */
 int formatCode;
 int wd; /* watch descriptor */
@@ -148,18 +145,18 @@ void print_last_lines(FILE * fd, int n) {
 
 bool updateLogBuffer(char * string) {
     int stringLen = strlen(string);
-    if (logBufferWritePosIndex + stringLen < LOG_BUFFER_SIZE) {
-        logBufferWritePosIndex += sprintf(logBuffer + logBufferWritePosIndex, "%s", string);
-        logBufferWritePosIndex = MOD(logBufferWritePosIndex, LOG_BUFFER_SIZE);
+    if (logBuffer.writePos + stringLen < logBuffer.size) {
+        logBuffer.writePos += sprintf(logBuffer.buffer + logBuffer.writePos, "%s", string);
+        logBuffer.writePos = MOD(logBuffer.writePos, logBuffer.size);
     } else {
         int i = 0;
-        int k = logBufferWritePosIndex;
+        int k = logBuffer.writePos;
         while (i < stringLen) {
-            logBuffer[MOD(k, LOG_BUFFER_SIZE)] = string[i];
+            logBuffer.buffer[MOD(k, logBuffer.size)] = string[i];
             i++;
             k++;
         }
-        logBufferWritePosIndex = MOD(k, LOG_BUFFER_SIZE);
+        logBuffer.writePos = MOD(k, logBuffer.size);
     }
     if (strstr(string, "\n") != NULL) { //if the new string has a newline, flush butter to screen
         fullWinRefresh();
@@ -168,8 +165,8 @@ bool updateLogBuffer(char * string) {
 }
 
 bool updateLogBufferC(char c) {
-    logBufferWritePosIndex += sprintf(logBuffer + logBufferWritePosIndex, "%c", c);
-    logBufferWritePosIndex = MOD(logBufferWritePosIndex, LOG_BUFFER_SIZE);
+    logBuffer.writePos += sprintf(logBuffer.buffer + logBuffer.writePos, "%c", c);
+    logBuffer.writePos = MOD(logBuffer.writePos, logBuffer.size);
     if (c == '\n') {
         fullWinRefresh();
     }
@@ -263,17 +260,17 @@ void toggleSearchWindow(void){
 
 void drawMainWindow(void) {
     wrefresh(bottom);
-    if (logBufferWritePosIndex != logBufferReadPosIndex) {
-        char drawBuf[LOG_BUFFER_SIZE];
+    if (logBuffer.writePos != logBuffer.readPos) {
+        char drawBuf[logBuffer.size];
         memset(drawBuf, 0, sizeof(drawBuf));
-        int k = 0; int i = logBufferReadPosIndex;
-        while ((i % LOG_BUFFER_SIZE)  != (MOD(logBufferWritePosIndex, LOG_BUFFER_SIZE))) {
-            drawBuf[k] = logBuffer[MOD(i, LOG_BUFFER_SIZE)];
+        int k = 0; int i = logBuffer.readPos;
+        while ((i % logBuffer.size)  != (MOD(logBuffer.writePos, logBuffer.size))) {
+            drawBuf[k] = logBuffer.buffer[MOD(i, logBuffer.size)];
             k++;
             i++;
         }
         wprintw(bottom, drawBuf);
-        logBufferReadPosIndex = logBufferWritePosIndex;
+        logBuffer.readPos = logBuffer.writePos;
     }
     wrefresh(bottom);
 }
@@ -283,8 +280,8 @@ void gracefulExit(void) {
     delwin(top);
     endwin();
     memset(searchBuffer,0,sizeof(searchBuffer));
-    memset(logBuffer,0,sizeof(logBuffer));
-    exit(1);   
+    memset(logBuffer.buffer,0,logBuffer.size);
+    exit(1); 
 }
 
 void fullWinRefresh(void) {
@@ -297,10 +294,10 @@ void fullWinRefresh(void) {
 void refillMain(void) {
     int new_y, new_x;
     getmaxyx(stdscr, new_y, new_x);
-    int j = logBufferReadPosIndex -1;
+    int j = logBuffer.readPos -1;
     int newlineCount = 0;
-    while (newlineCount < new_y && j != logBufferReadPosIndex && logBuffer[j] != '\0') {
-        if (logBuffer[j] == '\n') {
+    while (newlineCount < new_y && j != logBuffer.readPos && logBuffer.buffer[j] != '\0') {
+        if (logBuffer.buffer[j] == '\n') {
             newlineCount++;
             // wprintw(bottom, "%i, %i\n", newlineCount, j);
             // wrefresh(bottom);
@@ -308,7 +305,7 @@ void refillMain(void) {
         j = MOD((j-1), LOG_BUFFER_SIZE);
     }
 
-    logBufferReadPosIndex = MOD(j + 1, LOG_BUFFER_SIZE);
+    logBuffer.readPos = MOD(j + 1, logBuffer.size);
     werase(bottom);
     fullWinRefresh();
 }
@@ -438,8 +435,11 @@ int main(int argc, char * argv[]) {
     char choice;
 
     //initialize buffers
-    memset(logBuffer, 0, sizeof(logBuffer));
     memset(searchBuffer, 0, sizeof(searchBuffer));
+    memset(logBuffer.buffer, 0, sizeof(logBuffer.buffer));
+    logBuffer.size = LOG_BUFFER_SIZE;
+    logBuffer.readPos = 0;
+    logBuffer.writePos = 0;
 
     //ncurses init
     initscr();
