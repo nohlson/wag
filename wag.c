@@ -34,28 +34,23 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <fcntl.h>
 
 //TODO clean up and describe globals
-int top_size;
-int bottom_size = 3;
-WINDOW * top;
-WINDOW * bottom;
-int dualPane;
-int parent_y, parent_x;
-char logBuffer[LOG_BUFFER_SIZE];
-char searchBuffer[1000];
-char searchTerm[1000];
-FILE * readfd;
-char eventBuffer[EVENT_BUF_LEN];
-int fd;
-int logBufferReadPosIndex = 0;
-int logBufferWritePosIndex = 0;
-char filename[100];
+WINDOW *top;    /* top 'search' window */
+WINDOW *bottom; /* bottom 'main' window */
+bool dualPane;  /* is the second window visible */
+int parent_y, parent_x; /*size of the terminal window itself */
+char logBuffer[LOG_BUFFER_SIZE];    /* buffer for the log, to be replaced with circbuffer struct */
+char searchBuffer[1000];    /* buffer for the users search query */
+char searchQuery[1000];     /* user's search query */
+FILE * readfd;  /*file descriptor for log file */
+char eventBuffer[EVENT_BUF_LEN];    /* event buffer for inotify */
+int inFd; /* file descriptor for inotify */
+int logBufferReadPosIndex = 0;  /* log buffer read index, to be replaced with circbuffer */
+int logBufferWritePosIndex = 0; /* log buffer wrire index, to be replaced with circbuffer */
+char filename[100]; /* log filename */
 int formatCode;
-int wd;
+int wd; /* watch descriptor */
 
 char formats[NUM_FORMAT_OPTIONS][50] = {"1. None", "2. {NAME}YYYY-MM-DD.{FILEEXT}", "3. MM-DD-YYY.{FILEEXT}"};
-int half;
-
-
 
 void track(void) {
     char c;
@@ -66,7 +61,7 @@ void track(void) {
     struct stat sb;
     while (1) {
         memset(eventBuffer, 0, EVENT_BUF_LEN);
-        length = read( fd, eventBuffer, EVENT_BUF_LEN );
+        length = read( inFd, eventBuffer, EVENT_BUF_LEN );
         j = 0;
         while (j < length) {
             struct inotify_event *event = (struct inotify_event *)&eventBuffer[j];
@@ -87,7 +82,7 @@ void track(void) {
                 sprintf(info, "File has moved. Attempting to rotate log...\n");
                 updateLogBuffer(info);
                 sleep(1); //wait for rotation to occur
-                if ((wd = swapFilename(fd, wd, filename, filename)) < 0) {
+                if ((wd = swapFilename(inFd, wd, filename, filename)) < 0) {
                     perror("filename not found");
                     exit(1);
                 } else {
@@ -196,12 +191,12 @@ void search(void) {
             if (cur == 127) { //delete char
                 i--;
                 searchBuffer[i] = '\0'; //delete the char from the buffer
-                wmove(top, half-2, 8 + i);
+                wmove(top, (parent_y / 2) - 2, 8 + i);
                 wdelch(top);
                 wrefresh(top);
             } else if (cur != -10 && cur != -102) { //special case for change in screen size during typing. needs to be rethought
                 searchBuffer[i] = cur;
-                wmove(top, half-2, 8 + i);
+                wmove(top, (parent_y / 2)-2, 8 + i);
                 wprintw(top, "%c", cur);
                 wrefresh(top);
                 i++;
@@ -210,7 +205,7 @@ void search(void) {
 
         searchBuffer[i] = '\0';
 
-        sprintf(searchTerm, "%s", searchBuffer);
+        sprintf(searchQuery, "%s", searchBuffer);
         drawSearchWindow();
 
         wrefresh(top);
@@ -220,7 +215,7 @@ void search(void) {
                 cur = wgetch(top);
                 if (cur == 127) {
                         memset(searchBuffer, 0, sizeof(searchBuffer));
-                        memset(searchTerm, 0, sizeof(searchTerm));
+                        memset(searchQuery, 0, sizeof(searchQuery));
                         drawSearchWindow();
                         break;
                 } else if (cur == 's') {
@@ -237,10 +232,10 @@ void search(void) {
 }
 
 void drawSearchWindow(void) {
-    half = parent_y/2;
+    int half = parent_y/2;
     top = newwin(half, parent_x, 0, 0);
     scrollok(top, TRUE);
-    wprintw(top, searchTerm);
+    wprintw(top, searchQuery);
     mvwhline(top, half-1, 0, ACS_HLINE, parent_x);
     mvwhline(top, half-3, 0, ACS_HLINE, parent_x);
     mvwprintw(top, half-2, 0, "Search: ");
@@ -251,14 +246,14 @@ void drawSearchWindow(void) {
 
 void toggleSearchWindow(void){
     if (dualPane) {
-        dualPane = 0;
-        memset(searchTerm, 0, sizeof(searchTerm));
+        dualPane = false;
+        memset(searchQuery, 0, sizeof(searchQuery));
         delwin(top);
         refresh();
         fullWinRefresh();
         refillMain();
     } else {
-        dualPane = 1;
+        dualPane = true;
         //clear search buffer
         memset(searchBuffer,0,sizeof(searchBuffer));
         drawSearchWindow();
@@ -327,7 +322,7 @@ void winchHandler(int nil) {
     getmaxyx(stdscr, new_y, new_x);
     parent_y = new_y;
     parent_x = new_x;
-    mvwin(bottom, new_y - bottom_size, 0);
+    mvwin(bottom, new_y, 0);
     wclear(bottom);
     refillMain();
 }
@@ -438,7 +433,7 @@ int swapFilename(int fd, int wd, char * oldFilename, char * newFilename) {
 }
 
 int main(int argc, char * argv[]) {
-    dualPane = 0; // starts off with one pane
+    dualPane = false; // starts off with one pane
     char startupMessages[200];
     char choice;
 
@@ -465,12 +460,12 @@ int main(int argc, char * argv[]) {
     signal(SIGINT, intHandler);
 
     /*creating the INOTIFY instance*/
-    if ((fd = inotify_init()) < 0 ) {
+    if ((inFd = inotify_init()) < 0 ) {
         perror("inotify_init error");
     }
 
     //add watch for the filename
-    wd = inotify_add_watch( fd, filename, IN_MODIFY|IN_MOVE_SELF);
+    wd = inotify_add_watch( inFd, filename, IN_MODIFY|IN_MOVE_SELF);
 
     //open file for reading and print last lines
     readfd = fopen(filename, "r");
