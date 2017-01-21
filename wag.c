@@ -40,6 +40,7 @@ bool dualPane;  /* is the second window visible */
 int parent_y, parent_x; /*size of the terminal window itself */
 char searchBuffer[1000];    /* buffer for the users search query */
 char searchQuery[1000];     /* user's search query */
+char searchResult[1000];
 FILE * readfd;  /*file descriptor for log file */
 char eventBuffer[EVENT_BUF_LEN];    /* event buffer for inotify */
 int inFd; /* file descriptor for inotify */
@@ -203,9 +204,41 @@ void search(void) {
         searchBuffer[i] = '\0';
 
         sprintf(searchQuery, "%s", searchBuffer);
-        drawSearchWindow();
 
-        wrefresh(top);
+        //search file
+        FILE *fpsearch =fopen(filename,"r");
+        char tmp[500]={0x0};
+
+        int lineNumber = 0;
+        int found = 0;
+        int stopSearch = 0;
+
+        while (fpsearch != NULL && fgets(tmp, sizeof(tmp), fpsearch) != NULL && !stopSearch) {
+            lineNumber++;
+            if (strstr(tmp, searchQuery)) {
+                found = 1;
+                sprintf(searchResult, "%s", tmp);
+                drawSearchWindow();
+                //printf("line number: %d %s", counter, tmp);
+                while ((cur = wgetch(top)) != 'n') {
+                    if (cur == 's') {
+                        breakOut = 1;
+                        stopSearch = 1;
+                        break;
+                    }
+                }
+            }
+        }
+        if (fpsearch != NULL) {
+            fclose(fpsearch);
+        }
+
+        //print out if search came up empty
+        if (!found) {
+            sprintf(searchResult, "Query not found\n");
+            drawSearchWindow();
+        }
+
         //after search state, wating for input
         if (!breakOut) {
             while (1) {
@@ -232,7 +265,7 @@ void drawSearchWindow(void) {
     int half = parent_y/2;
     top = newwin(half, parent_x, 0, 0);
     scrollok(top, TRUE);
-    wprintw(top, searchQuery);
+    wprintw(top, searchResult);
     mvwhline(top, half-1, 0, ACS_HLINE, parent_x);
     mvwhline(top, half-3, 0, ACS_HLINE, parent_x);
     mvwprintw(top, half-2, 0, "Search: ");
@@ -244,7 +277,7 @@ void drawSearchWindow(void) {
 void toggleSearchWindow(void){
     if (dualPane) {
         dualPane = false;
-        memset(searchQuery, 0, sizeof(searchQuery));
+        memset(searchResult, 0, sizeof(searchResult));
         delwin(top);
         refresh();
         fullWinRefresh();
